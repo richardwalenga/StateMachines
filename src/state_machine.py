@@ -49,7 +49,7 @@ class StateMachineBase(metaclass=StateMachineMeta):
     def __init__(self) -> None:
         self.state = getattr(self.__class__, 'initial_state', None)
         if self.state is None:
-            raise RuntimeError(f'{self.__class__.name} cannot be instantiated')
+            raise RuntimeError(f'{self.__class__.__name__} cannot be instantiated')
 
     def after_transition(self, from_state: enum.Enum, to_state: enum.Enum) -> None:
         """Override in a subclass to run code after the new state takes effect. There

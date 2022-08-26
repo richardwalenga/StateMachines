@@ -58,6 +58,9 @@ class InvalidStateMachineTest(unittest.TestCase):
         self.assertRaises(TypeError, with_no_states)
         self.assertRaises(TypeError, with_non_enum_states)
         self.assertRaises(TypeError, with_bad_initial_state)
+        with self.assertRaises(RuntimeError) as ctx:
+            SM.StateMachineBase()
+        self.assertTrue(str(ctx.exception).startswith('StateMachineBase cannot'))
 
 
 class GumballMachineTest(unittest.TestCase):
