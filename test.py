@@ -168,29 +168,43 @@ class CsvParserTest(unittest.TestCase):
 
     def test_malfomed(self):
         with open('malformed.csv', 'r') as f:
-            self.assertRaises(CSV.CsvParseException,
-                              functools.partial(self.parser.parse, f))
+            with self.assertRaises(CSV.CsvParseException) as ctx:
+                self.parser.parse(f)
+            exc_msg = str(ctx.exception)
+            self.assertTrue(
+                'Unbalanced double quote' in exc_msg and 'field 3 of record 1' in exc_msg)
 
     def test_doublequote_not_field_end(self):
         with open('doublequote-not-field-end.csv', 'r') as f:
-            self.assertRaises(CSV.CsvParseException,
-                              functools.partial(self.parser.parse, f))
+            with self.assertRaises(CSV.CsvParseException) as ctx:
+                self.parser.parse(f)
+            exc_msg = str(ctx.exception)
+            self.assertTrue(
+                'Unexpected character   found after a double' in exc_msg and 'field 3 of record 1' in exc_msg)
 
     def test_doublequote_not_field_begin(self):
         with open('doublequote-not-field-begin.csv', 'r') as f:
-            self.assertRaises(CSV.CsvParseException,
-                              functools.partial(self.parser.parse, f))
+            with self.assertRaises(CSV.CsvParseException) as ctx:
+                self.parser.parse(f)
+            exc_msg = str(ctx.exception)
+            self.assertTrue(
+                'Unexpected double quote' in exc_msg and 'field 3 of record 1' in exc_msg)
 
     def test_non_contiguous_doublequotes_in_field(self):
         with open('non-contiguous-doublequotes-in-field.csv', 'r') as f:
-            self.assertRaises(CSV.CsvParseException,
-                              functools.partial(self.parser.parse, f))
+            with self.assertRaises(CSV.CsvParseException) as ctx:
+                self.parser.parse(f)
+            exc_msg = str(ctx.exception)
+            self.assertTrue(
+                'Unexpected character ! found after a double' in exc_msg and 'field 3 of record 2' in exc_msg)
 
     def test_field_count_mismatch(self):
         with open('field-count-mismatch.csv', 'r') as f:
-            self.assertRaises(CSV.CsvParseException,
-                              functools.partial(self.parser.parse, f))
-
+            with self.assertRaises(CSV.CsvParseException) as ctx:
+                self.parser.parse(f)
+            exc_msg = str(ctx.exception)
+            self.assertEqual(
+                'Record 2 has 4 fields but should have 3', exc_msg)
 
 if __name__ == '__main__':
     unittest.main()

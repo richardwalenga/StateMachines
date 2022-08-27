@@ -23,8 +23,8 @@ class CsvParseException(Exception):
 class CsvParser(StateMachineBase):
     """This is a class to parse CSV input into fields. The given
     CSV can have embedded newlines and commas in a field if it is
-    surrounded by double-quotes. Any literal doube-quotes within
-    the field must be escaped with a preceding double-quote."""
+    surrounded by double quotes. Any literal doube quotes within
+    the field must be escaped with one immediately preceding it."""
     __slots__ = ('fields', 'fields_per_record', 'doublequotes_in_field')
 
     states = States
@@ -91,6 +91,19 @@ class CsvParser(StateMachineBase):
         return 0 if len(self.fields) == 0 else self.record_number
 
     @property
+    def field_number(self) -> int:
+        """Gives the current field number for the current record.
+
+        Returns:
+            int: The current field number.
+        """
+        current_field = len(self.fields) + 1
+        if self.fields_per_record is None:
+            return current_field
+        record_field = current_field % self.fields_per_record
+        return record_field if record_field > 0 else self.fields_per_record
+
+    @property
     def record_number(self) -> int:
         """Gives the current record number starting from one.
 
@@ -121,9 +134,9 @@ class CsvParser(StateMachineBase):
         """
         if self.doublequotes_in_field > 0:
             if self.has_unbalanced_doublequotes:
-                raise CsvParseException(f'Field {len(self.fields)+1} in Record {self.record_number} has unbalanced double-quotes')
+                self.raise_field_error('Unbalanced double quotes found')
             if not self.state == States.QUOTE_IN_FIELD:
-                raise CsvParseException(f'Field {len(self.fields)+1} in Record {self.record_number} must end with a double-quote')
+                raise self.raise_field_error('Must end with a double quote')
             self.doublequotes_in_field = 0
         self.fields.append(str(builder))
         builder.clear()
@@ -137,11 +150,14 @@ class CsvParser(StateMachineBase):
             CsvParseException: Raised when subsequent records
             don't have the same number of fields as the first.
         """
-        fields_discrepancy = len(self.fields) % self.fields_per_record
+        num_fields = len(self.fields)
+        fields_discrepancy = num_fields % self.fields_per_record
         if fields_discrepancy == 0:
             return
+        problem_record_number = self.record_number - 1
+        num_fields_in_problem_record = num_fields - (self.fields_per_record * (problem_record_number - 1))
         raise CsvParseException(
-            f'Record {self.record_number} has {fields_discrepancy} fields but should have {self.fields_per_record}')
+            f'Record {problem_record_number} has {num_fields_in_problem_record} fields but should have {self.fields_per_record}')
 
     def end_record(self, builder: StringBuilder) -> None:
         """Finishes the current record.
@@ -167,11 +183,11 @@ class CsvParser(StateMachineBase):
             builder (StringBuilder): Holds field content.
         """
         if self.state == States.QUOTE_IN_FIELD:
-            # We most recently found a double-quote which
+            # We most recently found a double quote which
             # was not at the very beginning of the field.
             # In most caess we have to defer until we know
             # the next non-doublequote character in order to
-            # avoid outputting a double-quote in a situation
+            # avoid outputting a double quote in a situation
             # like this which should obviously represent an
             # empty field:  ...,"",...
             if self.has_unbalanced_doublequotes:
@@ -190,20 +206,21 @@ class CsvParser(StateMachineBase):
             return
 
         if self.state == States.QUOTE_IN_FIELD and not self.has_unbalanced_doublequotes:
-            raise CsvParseException(f'Unexpected character {ch} found after a double-quote in field {len(self.fields)+1} of record {self.record_number}')
+            self.raise_field_error(
+                f'Unexpected character {ch} found after a double quote')
 
         if self.state != States.IN_FIELD:
             self.transition(States.IN_FIELD)
         builder.append(ch)
 
     def process_doublequote(self, builder: StringBuilder) -> None:
-        """Handles a double-quote.
+        """Handles a double quote.
 
         Args:
             builder (StringBuilder): Holds field content.
 
         Raises:
-            CsvParseException: Raised if a double-quote is not
+            CsvParseException: Raised if a double quote is not
             found at the very beginning and end of a field.
         """
         match self.state:
@@ -212,8 +229,7 @@ class CsvParser(StateMachineBase):
                 self.transition(States.IN_FIELD)
             case States.IN_FIELD:
                 if self.doublequotes_in_field == 0:
-                    raise CsvParseException(
-                        f'Unexpected double-quote found in record {self.record_number} at position {len(builder)+1} of field {len(self.fields)+1}')
+                    self.raise_field_error('Unexpected double quote found')
                 self.doublequotes_in_field += 1
                 self.transition(States.QUOTE_IN_FIELD)
             case States.QUOTE_IN_FIELD:
@@ -227,7 +243,7 @@ class CsvParser(StateMachineBase):
                     builder.append('"')
                 self.transition(States.IN_FIELD)
             case other:
-                raise CsvParseException(f'Unexpected state {other}')
+                self.raise_field_error(f'Unexpected state {other}')
 
     def parse(self, read_from: io.TextIOBase):
         """Parses the given CSV input into fields.
@@ -249,6 +265,19 @@ class CsvParser(StateMachineBase):
             if self.state != States.END_OF_RECORD:
                 self.end_record(builder)
             self.transition(States.END)
+    
+    def raise_field_error(self, msg: str) -> None:
+        """Raises a CsvParseException with the current field and record numbers
+        appended to the message passed in.
+
+        Args:
+            msg (str): The first part of the message for the CsvParseException.
+
+        Raises:
+            CsvParseException: The final message include field and record.
+        """
+        raise CsvParseException(
+            f'{msg} -> field {self.field_number} of record {self.record_number}')
 
     def reset(self) -> None:
         """Resets the parser to its initial state."""
