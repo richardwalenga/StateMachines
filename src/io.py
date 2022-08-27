@@ -1,6 +1,7 @@
 import functools
 import io
-from typing import Iterable
+from collections.abc import Iterable
+
 
 def each_character_of(to_read: io.TextIOBase) -> Iterable[str]:
     """Reads one character at a time from a text stream

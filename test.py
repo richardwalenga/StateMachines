@@ -60,7 +60,8 @@ class InvalidStateMachineTest(unittest.TestCase):
         self.assertRaises(TypeError, with_bad_initial_state)
         with self.assertRaises(RuntimeError) as ctx:
             SM.StateMachineBase()
-        self.assertTrue(str(ctx.exception).startswith('StateMachineBase cannot'))
+        self.assertTrue(str(ctx.exception).startswith(
+            'StateMachineBase cannot'))
 
 
 class GumballMachineTest(unittest.TestCase):
@@ -126,85 +127,75 @@ class CsvParserTest(unittest.TestCase):
     def test_multiline(self):
         self.assertEqual(CSV.States.BEGIN, self.parser.__class__.initial_state)
         self.assertEqual(CSV.States.BEGIN, self.parser.state)
-        self.assertEqual(0, len(self.parser))
+        records = None
         with open('multiline.csv', 'r') as multi:
-            self.parser.parse(multi)
+            records = list(self.parser.parse(multi))
         self.assertEqual(2, self.parser.record_number)
-        self.assertEqual(len(self.parser), self.parser.record_number)
         self.assertEqual(4, self.parser.fields_per_record)
         self.assertEqual(CSV.States.END, self.parser.state)
-        self.assertEqual('""Great, "" Great', self.parser.fields[2])
-        self.assertEqual(self.parser[0][2], self.parser.fields[2])
+        self.assertEqual('""Great, "" Great', records[0][2])
 
-        last_field_of_first_record = self.parser.fields[self.parser.fields_per_record-1]
+        last_field_of_first_record = records[0][-1]
         self.assertTrue('\n' in last_field_of_first_record,
                         'The last field of the first record should span multiple lines.')
-        self.assertEqual(self.parser[0][-1], last_field_of_first_record,
-                         'The two-dimensional access of [0][1] should return the last field of the first record.')
-        self.assertListEqual(
-            self.parser[0], self.parser[-2], 'Negative indexing should work to target first record.')
-        self.assertListEqual(
-            self.parser[1], self.parser[-1], 'Negative indexing should work to target second record.')
-        
-        self.assertEqual('', self.parser[1][1], 'A non-quoted field with nothing between the commas should be considered empty.')
-        self.assertEqual('', self.parser[1][2], 'A quoted field with nothing in between the quotes should be considered empty.')
+        self.assertEqual(
+            '', records[1][1], 'A non-quoted field with nothing between the commas should be considered empty.')
+        self.assertEqual(
+            '', records[1][2], 'A quoted field with nothing in between the quotes should be considered empty.')
 
-        last_field = self.parser.fields[-1]
+        last_field = records[-1][-1]
         self.assertEqual('Great', last_field)
-        self.assertEqual(self.parser[-1][-1], last_field,
-                         '[-1][-1] should retrieve the last field.')
+
+        self.assertTrue(records[-1] is not self.parser.fields,
+                         'The internal fields reference and the last record must not be the same')
 
         with self.assertRaises(IndexError, msg='There should be no record with an index of 2.') as ctx:
-            self.parser[self.parser.record_number]
+            records[self.parser.record_number]
         with self.assertRaises(IndexError, msg='-3 is too far from the end as there should be two records.') as ctx:
-            self.parser[-3]
+            records[-3]
 
-        num_iterations = 0
-        for record in self.parser:
-            num_iterations += 1
-            logger.info('Record %i\'s first value: %s',
-                        num_iterations, record[0])
-        self.assertEqual(num_iterations, self.parser.record_number)
+        logger.info(f'Parsed: {repr(records)}')
 
     def test_malfomed(self):
         with open('malformed.csv', 'r') as f:
             with self.assertRaises(CSV.CsvParseException) as ctx:
-                self.parser.parse(f)
+                # force iteration to trigger exception
+                list(self.parser.parse(f))
             exc_msg = str(ctx.exception)
             self.assertTrue(
                 'Unbalanced double quote' in exc_msg and 'field 3 of record 1' in exc_msg)
 
+    def _assert_parse_fails_with(self, filename: str, expected_exception: Exception) -> Exception:
+        with self.assertRaises(expected_exception=expected_exception) as ctx:
+            with open(filename, 'r') as f:
+                # force iteration to trigger exception
+                list(self.parser.parse(f))
+        return ctx.exception
+
     def test_doublequote_not_field_end(self):
-        with open('doublequote-not-field-end.csv', 'r') as f:
-            with self.assertRaises(CSV.CsvParseException) as ctx:
-                self.parser.parse(f)
-            exc_msg = str(ctx.exception)
-            self.assertTrue(
-                'Unexpected character   found after a double' in exc_msg and 'field 3 of record 1' in exc_msg)
+        exc_msg = str(self._assert_parse_fails_with(
+            'doublequote-not-field-end.csv', CSV.CsvParseException))
+        self.assertTrue(
+            'Unexpected character   found after a double' in exc_msg and 'field 3 of record 1' in exc_msg)
 
     def test_doublequote_not_field_begin(self):
-        with open('doublequote-not-field-begin.csv', 'r') as f:
-            with self.assertRaises(CSV.CsvParseException) as ctx:
-                self.parser.parse(f)
-            exc_msg = str(ctx.exception)
-            self.assertTrue(
-                'Unexpected double quote' in exc_msg and 'field 3 of record 1' in exc_msg)
+        exc_msg = str(self._assert_parse_fails_with(
+            'doublequote-not-field-begin.csv', CSV.CsvParseException))
+        self.assertTrue(
+            'Unexpected double quote' in exc_msg and 'field 3 of record 1' in exc_msg)
 
     def test_non_contiguous_doublequotes_in_field(self):
-        with open('non-contiguous-doublequotes-in-field.csv', 'r') as f:
-            with self.assertRaises(CSV.CsvParseException) as ctx:
-                self.parser.parse(f)
-            exc_msg = str(ctx.exception)
-            self.assertTrue(
-                'Unexpected character ! found after a double' in exc_msg and 'field 3 of record 2' in exc_msg)
+        exc_msg = str(self._assert_parse_fails_with(
+            'non-contiguous-doublequotes-in-field.csv', CSV.CsvParseException))
+        self.assertTrue(
+            'Unexpected character ! found after a double' in exc_msg and 'field 3 of record 2' in exc_msg)
 
     def test_field_count_mismatch(self):
-        with open('field-count-mismatch.csv', 'r') as f:
-            with self.assertRaises(CSV.CsvParseException) as ctx:
-                self.parser.parse(f)
-            exc_msg = str(ctx.exception)
-            self.assertEqual(
-                'Record 2 has 4 fields but should have 3', exc_msg)
+        exc_msg = str(self._assert_parse_fails_with(
+            'field-count-mismatch.csv', CSV.CsvParseException))
+        self.assertEqual(
+            'Record 2 has 4 fields but should have 3', exc_msg)
+
 
 if __name__ == '__main__':
     unittest.main()

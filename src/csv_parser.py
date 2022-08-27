@@ -1,10 +1,10 @@
 from __future__ import annotations
+from collections.abc import Iterable, Sequence
 from .io import each_character_of
 from .state_machine import StateMachineBase
 from .string_builder import StringBuilder
 import enum
 import io
-import math
 
 
 class States(enum.Enum):
@@ -21,11 +21,16 @@ class CsvParseException(Exception):
 
 
 class CsvParser(StateMachineBase):
-    """This is a class to parse CSV input into fields. The given
-    CSV can have embedded newlines and commas in a field if it is
-    surrounded by double quotes. Any literal doube quotes within
-    the field must be escaped with one immediately preceding it."""
-    __slots__ = ('fields', 'fields_per_record', 'doublequotes_in_field')
+    """This is a class to parse CSV input, which can have commas, newlines
+    and double quotes in a field if and only if the field starts and ends
+    with double quotes; however, not every field is required to be surrounded
+    by double quotes.
+
+    Any double quotes which are meant to be taken literally must be immediately
+    preceded by one.  For example, ...,"This is a double quote: "".",...
+    """
+    __slots__ = ('fields', 'fields_per_record',
+                 'doublequotes_in_field', 'record_number')
 
     states = States
 
@@ -35,60 +40,7 @@ class CsvParser(StateMachineBase):
         self.fields = []
         self.fields_per_record = None
         self.doublequotes_in_field = 0
-
-    def __iter__(self):
-        """Provides a way to iterate the parsed CSV by record.
-
-        Yields:
-            list: A list of strings representing the fields
-            making up a record.
-        """
-        for i in range(len(self)):
-            yield self[i]
-
-    def __getitem__(self, key):
-        """Supports the bracket syntax to retrieve a list
-        of fields for a record. This does support negative
-        indexing (-1 represents the last record).
-
-        Args:
-            key: The 0-based index of the desired record.
-
-        Raises:
-            TypeError: Raised if key is not an integer as
-            it is simpler to implement if we don't accept
-            slices.
-            IndexError: Raised for a key out of range.
-
-        Returns:
-            The list of fields for the record.
-        """
-        if not isinstance(key, int):
-            raise TypeError('key must be an integer')
-
-        field_count = len(self.fields)
-        err = IndexError('record index out of range')
-        start_index = 0
-        if key < 0:
-            if field_count <= self.fields_per_record:
-                raise err
-            factor = math.trunc(field_count / self.fields_per_record) + key
-            if factor < 0:
-                raise err
-            start_index = factor*self.fields_per_record
-        else:
-            start_index = key * self.fields_per_record
-            if start_index >= field_count:
-                raise err
-        return self.fields[start_index:start_index+self.fields_per_record]
-
-    def __len__(self) -> int:
-        """Returns the record count.
-
-        Returns:
-            int: Record count.
-        """
-        return 0 if len(self.fields) == 0 else self.record_number
+        self.record_number = 1
 
     @property
     def field_number(self) -> int:
@@ -97,22 +49,7 @@ class CsvParser(StateMachineBase):
         Returns:
             int: The current field number.
         """
-        current_field = len(self.fields) + 1
-        if self.fields_per_record is None:
-            return current_field
-        record_field = current_field % self.fields_per_record
-        return record_field if record_field > 0 else self.fields_per_record
-
-    @property
-    def record_number(self) -> int:
-        """Gives the current record number starting from one.
-
-        Returns:
-            int: The current record number.
-        """
-        if self.fields_per_record is None:
-            return 1
-        return math.ceil(len(self.fields) / self.fields_per_record)
+        return len(self.fields) + 1
 
     @property
     def has_unbalanced_doublequotes(self) -> bool:
@@ -134,15 +71,15 @@ class CsvParser(StateMachineBase):
         """
         if self.doublequotes_in_field > 0:
             if self.has_unbalanced_doublequotes:
-                self.raise_field_error('Unbalanced double quotes found')
+                self._raise_field_error('Unbalanced double quotes found')
             if not self.state == States.QUOTE_IN_FIELD:
-                raise self.raise_field_error('Must end with a double quote')
+                self._raise_field_error('Must end with a double quote')
             self.doublequotes_in_field = 0
         self.fields.append(str(builder))
         builder.clear()
         self.transition(States.END_OF_FIELD)
 
-    def check_for_invalid_number_of_fields(self) -> None:
+    def _check_for_invalid_number_of_fields(self) -> None:
         """Ensures the number of fields is consistent for each
         record found in the csv input.
 
@@ -155,9 +92,8 @@ class CsvParser(StateMachineBase):
         if fields_discrepancy == 0:
             return
         problem_record_number = self.record_number - 1
-        num_fields_in_problem_record = num_fields - (self.fields_per_record * (problem_record_number - 1))
         raise CsvParseException(
-            f'Record {problem_record_number} has {num_fields_in_problem_record} fields but should have {self.fields_per_record}')
+            f'Record {problem_record_number} has {num_fields} fields but should have {self.fields_per_record}')
 
     def end_record(self, builder: StringBuilder) -> None:
         """Finishes the current record.
@@ -167,13 +103,14 @@ class CsvParser(StateMachineBase):
         """
         self.end_field(builder)
         self.transition(States.END_OF_RECORD)
+        self.record_number += 1
         # After the first unembedded newline is processed, we
         # need to record the number of fields in this record to
         # verify against subsequent records.
         if self.fields_per_record is None:
             self.fields_per_record = len(self.fields)
             return
-        self.check_for_invalid_number_of_fields()
+        self._check_for_invalid_number_of_fields()
 
     def process_char(self, ch: str, builder: StringBuilder) -> None:
         """Processes the next character.
@@ -206,7 +143,7 @@ class CsvParser(StateMachineBase):
             return
 
         if self.state == States.QUOTE_IN_FIELD and not self.has_unbalanced_doublequotes:
-            self.raise_field_error(
+            self._raise_field_error(
                 f'Unexpected character {ch} found after a double quote')
 
         if self.state != States.IN_FIELD:
@@ -229,13 +166,13 @@ class CsvParser(StateMachineBase):
                 self.transition(States.IN_FIELD)
             case States.IN_FIELD:
                 if self.doublequotes_in_field == 0:
-                    self.raise_field_error('Unexpected double quote found')
+                    self._raise_field_error('Unexpected double quote found')
                 self.doublequotes_in_field += 1
                 self.transition(States.QUOTE_IN_FIELD)
             case States.QUOTE_IN_FIELD:
                 self.doublequotes_in_field += 1
                 # One cannot indefinitely defer the output of
-                # literal doublequote characters until a 
+                # literal doublequote characters until a
                 # non-doublequote character is found as this
                 # is a strange but valid situation:
                 # ...," """""" ",...
@@ -243,10 +180,22 @@ class CsvParser(StateMachineBase):
                     builder.append('"')
                 self.transition(States.IN_FIELD)
             case other:
-                self.raise_field_error(f'Unexpected state {other}')
+                self._raise_field_error(f'Unexpected state {other}')
 
-    def parse(self, read_from: io.TextIOBase):
-        """Parses the given CSV input into fields.
+    def _get_fields(self) -> Sequence[str]:
+        """Returns the current fields reference and then assigns
+        a brand new list to the fields variable to avoid any
+        manipulation of the latter to affect the former.
+
+        Returns:
+            Sequence[str]: Current record's fields.
+        """
+        to_ret, self.fields = self.fields, []
+        return to_ret
+
+    def parse(self, read_from: io.TextIOBase) -> Iterable[Sequence[str]]:
+        """Parses the given CSV input returning records as they
+        are completed.
 
         Args:
             read_from (io.TextIOBase): The stream of CSV input.
@@ -262,11 +211,15 @@ class CsvParser(StateMachineBase):
                         self.process_doublequote(builder)
                     case _:
                         self.process_char(c, builder)
+                if self.state == States.END_OF_RECORD:
+                    yield self._get_fields()
             if self.state != States.END_OF_RECORD:
                 self.end_record(builder)
+                yield self._get_fields()
             self.transition(States.END)
-    
-    def raise_field_error(self, msg: str) -> None:
+            self.record_number -= 1  # Move back to reflect final count.
+
+    def _raise_field_error(self, msg: str) -> None:
         """Raises a CsvParseException with the current field and record numbers
         appended to the message passed in.
 
@@ -282,6 +235,9 @@ class CsvParser(StateMachineBase):
     def reset(self) -> None:
         """Resets the parser to its initial state."""
         super().reset()
+        # Must use a new instance rather than clear to avoid manipulating
+        # the caller's last record.
         self.fields = []
         self.fields_per_record = None
         self.doublequotes_in_field = 0
+        self.record_number = 1
